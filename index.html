@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SmartLandslide — AI-Based Early Warning & Landslide Risk Monitoring</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<style>
+/* ============ TOKENS ============ */
+:root{
+  --bg:#0a1210; --bg-1:#0d1815; --bg-2:#101d19;
+  --card:rgba(255,255,255,0.035); --card-hi:rgba(255,255,255,0.055);
+  --line:rgba(233,242,236,0.10); --line-soft:rgba(233,242,236,0.06);
+  --ink:#e9f2ec; --ink-dim:#9db3aa; --ink-faint:#5f766c;
+  --cyan:#3fd6cf; --cyan-dim:#276e6a;
+  --amber:#e8a93c; --amber-dim:#8a651f;
+  --red:#e5555a; --red-dim:#7a2b2e;
+  --green:#3fbf6b; --green-dim:#1f5f39;
+  --terrain-a:#132420; --terrain-b:#0d1c18;
+  --radius-lg:18px; --radius-md:12px; --radius-sm:8px;
+  --font-ui:'IBM Plex Sans',system-ui,sans-serif;
+  --font-mono:'IBM Plex Mono',ui-monospace,monospace;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+:root:not([data-theme="light"]){ /* dark defaults already above */ }
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f3f6f4; --bg-1:#ffffff; --bg-2:#eef2f0;
+    --card:rgba(15,30,24,0.035); --card-hi:rgba(15,30,24,0.06);
+    --line:rgba(15,30,24,0.12); --line-soft:rgba(15,30,24,0.07);
+    --ink:#0f1e18; --ink-dim:#4b6259; --ink-faint:#8ea298;
+    --terrain-a:#e4ece7; --terrain-b:#d7e3dc;
+  }
+}
+:root[data-theme="dark"]{}
+html{scroll-padding-top:env(safe-area-inset-top,0px);}
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-ui);
+  -webkit-font-smoothing:antialiased; min-height:100%;
+}
+html,body{height:100%;}
+a{color:inherit;}
+button{font-family:inherit;}
+.mono{font-family:var(--font-mono);}
+::selection{background:var(--cyan-dim); color:#fff;}
+ 
+/* subtle topo background pattern */
+.topo-bg{
+  position:fixed; inset:0; z-index:0; pointer-events:none; opacity:0.5;
+  background-image:
+    repeating-radial-gradient(circle at 15% 20%, transparent 0, transparent 38px, var(--line-soft) 39px, transparent 40px),
+    repeating-radial-gradient(circle at 85% 75%, transparent 0, transparent 52px, var(--line-soft) 53px, transparent 54px);
+}
+ 
+/* ============ APP SHELL ============ */
+#app{position:relative; z-index:1; display:flex; min-height:100%;}
+ 
+.sidebar{
+  width:240px; flex:none; background:var(--bg-1); border-right:1px solid var(--line);
+  display:flex; flex-direction:column; padding:20px 14px; gap:4px;
+  position:sticky; top:0; height:100vh; height:100dvh;
+}
+.brand{display:flex; align-items:center; gap:10px; padding:6px 10px 18px;}
+.brand-mark{
+  width:34px; height:34px; border-radius:9px; background:linear-gradient(155deg,var(--cyan),var(--green));
+  display:flex; align-items:center; justify-content:center; flex:none;
+}
+.brand-mark svg{width:19px;height:19px;}
+.brand-name{font-weight:700; font-size:15px; letter-spacing:0.2px; line-height:1.1;}
+.brand-sub{font-size:10.5px; color:var(--ink-faint); font-family:var(--font-mono); margin-top:2px;}
+ 
+.navlist{display:flex; flex-direction:column; gap:2px; flex:1; overflow-y:auto;}
+.navitem{
+  display:flex; align-items:center; gap:11px; padding:9px 11px; border-radius:9px;
+  color:var(--ink-dim); font-size:13.5px; font-weight:500; cursor:pointer; border:none;
+  background:transparent; text-align:left; width:100%; transition:background .15s, color .15s;
+}
+.navitem svg{width:17px; height:17px; flex:none; opacity:0.85;}
+.navitem:hover{background:var(--card); color:var(--ink);}
+.navitem.active{background:var(--card-hi); color:var(--ink);}
+.navitem.active{box-shadow:inset 2px 0 0 var(--cyan);}
+ 
+.sidebar-foot{border-top:1px solid var(--line); padding-top:12px; margin-top:8px; display:flex; flex-direction:column; gap:8px;}
+.status-row{display:flex; align-items:center; gap:7px; font-size:11.5px; color:var(--ink-dim); font-family:var(--font-mono); padding:0 4px;}
+.dot{width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 6px var(--green); flex:none;}
+.sidebar-foot .navitem{padding:8px 11px;}
+ 
+.main{flex:1; min-width:0; display:flex; flex-direction:column;}
+.topbar{
+  position:sticky; top:0; z-index:5; padding:calc(14px + env(safe-area-inset-top,0px)) 24px 14px;
+  background:color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:16px;
+}
+.topbar h1{font-size:17px; margin:0; font-weight:600;}
+.topbar .sub{font-size:12px; color:var(--ink-faint); margin-top:1px;}
+.topbar-right{display:flex; align-items:center; gap:10px; font-size:11.5px;}
+.pill{
+  display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:100px;
+  background:var(--card); border:1px solid var(--line); font-family:var(--font-mono); font-size:11px; color:var(--ink-dim);
+  white-space:nowrap;
+}
+.pill.on{color:var(--green);}
+.hamburger{display:none; background:none; border:1px solid var(--line); border-radius:8px; width:36px; height:36px; color:var(--ink); align-items:center; justify-content:center;}
+ 
+.content{padding:22px 24px 90px; max-width:1180px; width:100%; margin:0 auto;}
+.page{display:none; animation:fadein .35s ease;}
+.page.active{display:block;}
+@keyframes fadein{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);}}
+@media (prefers-reduced-motion: reduce){ .page{animation:none;} }
+ 
+/* ============ COMMON UI ============ */
+.card{
+  background:var(--card); border:1px solid var(--line); border-radius:var(--radius-lg);
+  padding:18px; position:relative; overflow:hidden;
+}
+.grid{display:grid; gap:14px;}
+.g-stats{grid-template-columns:repeat(auto-fit,minmax(160px,1fr));}
+.g-2{grid-template-columns:repeat(2,1fr);}
+.g-3{grid-template-columns:repeat(3,1fr);}
+@media(max-width:900px){.g-2,.g-3{grid-template-columns:1fr;}}
+ 
+.eyebrow{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-faint); letter-spacing:.03em;}
+.section-head{display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin:34px 0 14px;}
+.section-head:first-child{margin-top:0;}
+.section-head h2{font-size:16px; margin:0; font-weight:600;}
+.section-head .desc{font-size:12.5px; color:var(--ink-faint);}
+ 
+.badge{
+  display:inline-flex; align-items:center; gap:6px; padding:4px 9px; border-radius:7px;
+  font-size:11px; font-weight:600; font-family:var(--font-mono); letter-spacing:.02em;
+}
+.badge-low{background:rgba(63,191,107,0.13); color:var(--green);}
+.badge-med{background:rgba(232,169,60,0.14); color:var(--amber);}
+.badge-high{background:rgba(229,85,90,0.15); color:var(--red);}
+.badge-neutral{background:var(--card-hi); color:var(--ink-dim);}
+.badge-cyan{background:rgba(63,214,207,0.13); color:var(--cyan);}
+ 
+.btn{
+  display:inline-flex; align-items:center; gap:7px; padding:9px 15px; border-radius:9px; font-size:13px;
+  font-weight:600; cursor:pointer; border:1px solid var(--line); background:var(--card); color:var(--ink);
+  transition:transform .12s, background .15s;
+}
+.btn:hover{background:var(--card-hi);}
+.btn:active{transform:scale(0.97);}
+.btn-primary{background:linear-gradient(135deg,var(--cyan),#2fae9f); border-color:transparent; color:#04211d;}
+.btn-primary:hover{filter:brightness(1.08);}
+.btn-ghost{background:transparent;}
+.btn-sm{padding:6px 11px; font-size:12px;}
+.btn:disabled{opacity:.45; cursor:not-allowed;}
+ 
+.demo-tag{
+  display:inline-flex; align-items:center; gap:6px; font-family:var(--font-mono); font-size:10px;
+  color:var(--amber); border:1px dashed var(--amber-dim); padding:3px 8px; border-radius:6px; letter-spacing:.03em;
+}
+ 
+hr.line{border:none; border-top:1px solid var(--line); margin:16px 0;}
+ 
+/* ============ LANDING ============ */
+.hero{
+  padding:54px 6px 10px; text-align:left; position:relative;
+}
+.hero-badge{margin-bottom:18px;}
+.hero h1{font-size:clamp(32px,5.4vw,52px); line-height:1.04; margin:0 0 16px; font-weight:700; letter-spacing:-0.01em; max-width:16ch;}
+.hero h1 .accent{color:var(--cyan);}
+.hero p{font-size:15.5px; color:var(--ink-dim); max-width:52ch; line-height:1.6; margin:0 0 26px;}
+.hero-cta{display:flex; gap:12px; flex-wrap:wrap; margin-bottom:44px;}
+ 
+.terrain-viz{
+  border-radius:var(--radius-lg); border:1px solid var(--line); overflow:hidden; background:var(--terrain-b);
+  position:relative; height:290px;
+}
+.terrain-viz svg{width:100%; height:100%; display:block;}
+ 
+.pillars-strip{display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:16px;}
+@media(max-width:760px){.pillars-strip{grid-template-columns:repeat(2,1fr);}}
+.pillar-mini{padding:14px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--card);}
+.pillar-mini .k{font-family:var(--font-mono); font-size:10px; color:var(--cyan); margin-bottom:6px;}
+.pillar-mini .v{font-size:13px; color:var(--ink-dim);}
+ 
+/* ============ STAT CARDS ============ */
+.stat-card{display:flex; flex-direction:column; gap:6px;}
+.stat-card .lbl{font-size:12px; color:var(--ink-faint); display:flex; align-items:center; justify-content:space-between;}
+.stat-card .val{font-family:var(--font-mono); font-size:26px; font-weight:600; line-height:1.1;}
+.stat-card .unit{font-size:13px; color:var(--ink-faint); font-weight:400;}
+.stat-card .foot{font-size:11px; color:var(--ink-faint); margin-top:2px;}
+ 
+.risk-card{grid-column:span 2;}
+@media(max-width:640px){.risk-card{grid-column:span 1;}}
+.risk-card .top{display:flex; align-items:center; justify-content:space-between;}
+.risk-score-big{font-family:var(--font-mono); font-size:40px; font-weight:700; margin:6px 0 2px;}
+.risk-bar-track{height:8px; border-radius:10px; background:var(--line); overflow:hidden; margin:10px 0 6px;}
+.risk-bar-fill{height:100%; border-radius:10px; transition:width .6s ease, background .6s ease;}
+ 
+/* ============ SENSOR CARDS ============ */
+.sensor-card{display:flex; flex-direction:column; gap:8px;}
+.sensor-card .head{display:flex; align-items:center; justify-content:space-between;}
+.sensor-card .name{font-size:12.5px; color:var(--ink-dim); font-weight:600;}
+.sensor-card .value{font-family:var(--font-mono); font-size:24px; font-weight:600;}
+.sensor-card canvas{width:100%!important; height:44px!important; margin-top:4px;}
+.sensor-card .meta{font-size:10.5px; color:var(--ink-faint); font-family:var(--font-mono);}
+ 
+/* ============ ARCH / PIPELINE ============ */
+.pipeline{display:flex; align-items:stretch; gap:8px; overflow-x:auto; padding:8px 2px 14px;}
+.pipe-node{
+  flex:none; min-width:132px; border:1px solid var(--line); background:var(--card); border-radius:var(--radius-md);
+  padding:14px 12px; text-align:center;
+}
+.pipe-node .ic{width:30px;height:30px;margin:0 auto 8px; border-radius:8px; background:var(--card-hi); display:flex; align-items:center; justify-content:center;}
+.pipe-node .ic svg{width:16px;height:16px; color:var(--cyan);}
+.pipe-node .t{font-size:12.5px; font-weight:600;}
+.pipe-node .s{font-size:10.5px; color:var(--ink-faint); margin-top:3px;}
+.pipe-arrow{flex:none; align-self:center; color:var(--ink-faint); font-size:16px; padding:0 2px;}
+ 
+/* ============ TABLE ============ */
+.tablewrap{overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius-md);}
+table{width:100%; border-collapse:collapse; font-size:13px; min-width:560px;}
+th{text-align:left; font-size:11px; color:var(--ink-faint); font-weight:600; padding:11px 14px; border-bottom:1px solid var(--line); background:var(--card);}
+td{padding:11px 14px; border-bottom:1px solid var(--line-soft); color:var(--ink);}
+tr:last-child td{border-bottom:none;}
+ 
+/* ============ MAP ============ */
+.map-wrap{border:1px solid var(--line); border-radius:var(--radius-lg); overflow:hidden; background:var(--terrain-b); position:relative;}
+.map-svg{width:100%; height:440px; display:block;}
+.station-dot{cursor:pointer;}
+.station-dot circle.pulse{animation:pulse 2.4s ease-out infinite;}
+@keyframes pulse{0%{opacity:.55; r:7;} 100%{opacity:0; r:20;}}
+@media (prefers-reduced-motion: reduce){ .station-dot circle.pulse{animation:none; display:none;} }
+.map-filters{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;}
+.chip{
+  padding:6px 12px; border-radius:100px; border:1px solid var(--line); background:var(--card); font-size:12px;
+  color:var(--ink-dim); cursor:pointer;
+}
+.chip.active{background:var(--card-hi); color:var(--ink); border-color:var(--cyan);}
+.station-popup{
+  position:absolute; width:220px; background:var(--bg-1); border:1px solid var(--line); border-radius:var(--radius-md);
+  padding:14px; box-shadow:0 14px 34px rgba(0,0,0,.4); font-size:12.5px; z-index:6; display:none;
+}
+.station-popup h4{margin:0 0 6px; font-size:13.5px;}
+.station-popup .row{display:flex; justify-content:space-between; padding:3px 0; color:var(--ink-dim); font-family:var(--font-mono); font-size:11.5px;}
+.station-popup .close{position:absolute; top:8px; right:10px; cursor:pointer; color:var(--ink-faint); background:none; border:none; font-size:14px;}
+ 
+/* ============ ALERTS ============ */
+.alert-banner{
+  border-radius:var(--radius-lg); padding:16px 18px; display:flex; align-items:center; gap:14px; margin-bottom:20px;
+  border:1px solid var(--red-dim); background:linear-gradient(120deg, rgba(229,85,90,0.14), rgba(229,85,90,0.04));
+}
+.alert-banner .ic{font-size:22px; flex:none;}
+.alert-banner .txt strong{display:block; font-size:14px; margin-bottom:2px;}
+.alert-banner .txt span{font-size:12.5px; color:var(--ink-dim);}
+.alert-banner .acts{margin-left:auto; display:flex; gap:8px; flex:none;}
+.alert-item{display:flex; gap:14px; padding:15px 0; border-bottom:1px solid var(--line-soft);}
+.alert-item:last-child{border-bottom:none;}
+.alert-item .sev-dot{width:9px;height:9px;border-radius:50%;margin-top:5px;flex:none;}
+.alert-item .body{flex:1;}
+.alert-item .row1{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:3px;}
+.alert-item .ttl{font-size:13.5px; font-weight:600;}
+.alert-item .msg{font-size:12.5px; color:var(--ink-dim); line-height:1.5; margin:4px 0 8px;}
+.alert-item .meta{font-size:11px; color:var(--ink-faint); font-family:var(--font-mono);}
+.alert-item .acts{display:flex; gap:8px; margin-top:8px;}
+.alert-item.ack{opacity:.5;}
+ 
+/* ============ CONTRIBUTION BARS ============ */
+.contrib-row{margin-bottom:14px;}
+.contrib-row .top{display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:6px;}
+.contrib-row .top .n{color:var(--ink-dim);}
+.contrib-row .top .lvl{font-family:var(--font-mono); font-size:11px;}
+.contrib-track{height:7px; background:var(--line); border-radius:8px; overflow:hidden;}
+.contrib-fill{height:100%; border-radius:8px; background:var(--cyan); transition:width .5s ease;}
+ 
+/* ============ SLIDERS (Simulation) ============ */
+.sim-field{margin-bottom:20px;}
+.sim-field .lbl{display:flex; justify-content:space-between; font-size:13px; margin-bottom:8px; color:var(--ink-dim);}
+.sim-field .lbl b{color:var(--ink); font-family:var(--font-mono); font-weight:600;}
+input[type=range]{
+  -webkit-appearance:none; width:100%; height:5px; border-radius:6px; background:var(--line); outline:none;
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none; width:17px; height:17px; border-radius:50%; background:var(--cyan);
+  border:3px solid var(--bg-1); cursor:pointer; box-shadow:0 0 0 1px var(--cyan);
+}
+input[type=range]::-moz-range-thumb{
+  width:17px; height:17px; border-radius:50%; background:var(--cyan); border:3px solid var(--bg-1); cursor:pointer;
+}
+ 
+.toggle-row{display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--line-soft);}
+.toggle-row:last-child{border-bottom:none;}
+.toggle-row .l .t{font-size:13.5px; font-weight:600;}
+.toggle-row .l .d{font-size:11.5px; color:var(--ink-faint); margin-top:2px;}
+.switch{width:42px; height:24px; border-radius:14px; background:var(--line); position:relative; cursor:pointer; flex:none; border:none; padding:0;}
+.switch .knob{width:18px; height:18px; border-radius:50%; background:var(--ink-dim); position:absolute; top:3px; left:3px; transition:left .18s, background .18s;}
+.switch.on{background:var(--cyan-dim);}
+.switch.on .knob{left:21px; background:var(--cyan);}
+ 
+.preset-row{display:flex; gap:10px; flex-wrap:wrap; margin:14px 0 4px;}
+.preset-btn{
+  flex:1; min-width:150px; text-align:left; padding:13px 14px; border-radius:var(--radius-md); border:1px solid var(--line);
+  background:var(--card); cursor:pointer;
+}
+.preset-btn .t{font-size:13px; font-weight:600; display:flex; align-items:center; gap:7px;}
+.preset-btn .d{font-size:11px; color:var(--ink-faint); margin-top:3px;}
+.preset-btn:hover{border-color:var(--cyan);}
+ 
+/* toast */
+#toast-wrap{position:fixed; bottom:calc(20px + env(safe-area-inset-bottom,0px)); right:20px; z-index:50; display:flex; flex-direction:column; gap:8px; align-items:flex-end;}
+.toast{
+  background:var(--bg-1); border:1px solid var(--line); border-radius:10px; padding:11px 15px; font-size:12.5px;
+  box-shadow:0 10px 26px rgba(0,0,0,.35); display:flex; align-items:center; gap:9px; animation:toastin .25s ease;
+  max-width:300px;
+}
+@keyframes toastin{from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:translateY(0);}}
+ 
+/* pillars about */
+.pillar-card{padding:20px;}
+.pillar-card .tag{font-family:var(--font-mono); font-size:10.5px; color:var(--cyan); margin-bottom:10px;}
+.pillar-card h3{font-size:16px; margin:0 0 10px;}
+.pillar-card ul{margin:0; padding-left:18px; color:var(--ink-dim); font-size:12.5px; line-height:1.9;}
+ 
+/* workflow */
+.workflow{display:flex; gap:0; overflow-x:auto; padding:6px 2px 16px; align-items:stretch;}
+.wf-step{flex:none; width:150px; text-align:center; position:relative; padding:0 4px;}
+.wf-num{width:34px; height:34px; border-radius:50%; border:1px solid var(--cyan); color:var(--cyan); display:flex; align-items:center; justify-content:center; margin:0 auto 10px; font-family:var(--font-mono); font-size:13px; font-weight:600; background:var(--bg);}
+.wf-step .t{font-size:12.5px; font-weight:600;}
+.wf-step .d{font-size:11px; color:var(--ink-faint); margin-top:4px; line-height:1.4;}
+.wf-connector{flex:none; width:32px; align-self:flex-start; margin-top:16px; color:var(--ink-faint);}
+ 
+.footer-app{border-top:1px solid var(--line); padding:26px 24px 40px; margin-top:20px;}
+.footer-app .grid-f{display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap;}
+.footer-app .note{font-size:11.5px; color:var(--ink-faint); max-width:60ch; line-height:1.6; margin-top:14px;}
+.footer-links{display:flex; gap:18px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-dim);}
+ 
+.empty-state{text-align:center; padding:50px 20px; color:var(--ink-faint);}
+.empty-state svg{width:40px; height:40px; margin-bottom:12px; opacity:.5;}
+.empty-state .t{font-size:13.5px; color:var(--ink-dim); font-weight:600; margin-bottom:4px;}
+.empty-state .d{font-size:12px;}
+ 
+.skeleton{background:linear-gradient(90deg, var(--card) 25%, var(--card-hi) 37%, var(--card) 63%); background-size:400% 100%; animation:sk 1.4s infinite;}
+@keyframes sk{0%{background-position:100% 0;} 100%{background-position:0 0;}}
+ 
+/* mobile nav */
+.mobile-nav{display:none; position:fixed; bottom:0; left:0; right:0; z-index:20; background:var(--bg-1); border-top:1px solid var(--line);
+  padding:8px 4px calc(8px + env(safe-area-inset-bottom,0px)); }
+.mobile-nav .row{display:flex; overflow-x:auto; gap:2px;}
+.mobile-nav .item{flex:none; min-width:64px; display:flex; flex-direction:column; align-items:center; gap:3px; padding:6px 8px; border:none; background:none; color:var(--ink-faint); font-size:9.5px; font-family:var(--font-mono);}
+.mobile-nav .item svg{width:18px; height:18px;}
+.mobile-nav .item.active{color:var(--cyan);}
+ 
+@media(max-width:900px){
+  .sidebar{display:none;}
+  .hamburger{display:flex;}
+  .mobile-nav{display:block;}
+  .content{padding-bottom:110px;}
+}
+.drawer{position:fixed; inset:0; z-index:40; display:none;}
+.drawer.open{display:block;}
+.drawer .scrim{position:absolute; inset:0; background:rgba(0,0,0,.55);}
+.drawer .panel{position:absolute; top:0; left:0; bottom:0; width:270px; background:var(--bg-1); border-right:1px solid var(--line); padding:20px 14px; overflow-y:auto;}
+ 
+/* login gate */
+#login-gate{position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center; background:var(--bg); padding:20px;}
+.login-card{width:100%; max-width:360px; border:1px solid var(--line); border-radius:var(--radius-lg); padding:30px; background:var(--card);}
+.login-card .brand{padding:0 0 22px;}
+.login-card h2{font-size:17px; margin:0 0 6px;}
+.login-card p{font-size:12.5px; color:var(--ink-faint); margin:0 0 20px; line-height:1.6;}
+.role-opt{display:flex; align-items:center; gap:12px; padding:13px; border:1px solid var(--line); border-radius:var(--radius-md); margin-bottom:10px; cursor:pointer;}
+.role-opt.sel{border-color:var(--cyan); background:var(--card-hi);}
+.role-opt .ic{width:34px; height:34px; border-radius:9px; background:var(--card-hi); display:flex; align-items:center; justify-content:center; flex:none;}
+.role-opt .t{font-size:13.5px; font-weight:600;}
+.role-opt .d{font-size:11px; color:var(--ink-faint);}
+ 
+.scroll-x{overflow-x:auto;}
+::-webkit-scrollbar{height:8px; width:8px;}
+::-webkit-scrollbar-thumb{background:var(--line); border-radius:8px;}
+:focus-visible{outline:2px solid var(--cyan); outline-offset:2px;}
+</style>
+</head>
+<body>
+<div class="topo-bg"></div>
+ 
+<!-- ================= LOGIN GATE ================= -->
+<div id="login-gate">
+  <div class="login-card">
+    <div class="brand">
+      <div class="brand-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M3 18L9 8l4 6 3-4 5 8H3z" stroke="#04211d" stroke-width="1.8" stroke-linejoin="round"/></svg></div>
+    </div>
+    <h2>Sign in to SmartLandslide</h2>
+    <p>Prototype access. Choose a role to view the monitoring console — no real credentials required for this demo.</p>
+    <div id="role-options"></div>
+    <button class="btn btn-primary" style="width:100%; justify-content:center; margin-top:8px;" onclick="enterApp()">Continue to Dashboard</button>
+    <div style="margin-top:14px;" class="demo-tag">PROTOTYPE LOGIN — DEMO DATA ONLY</div>
+  </div>
+</div>
+ 
+<!-- ================= APP ================= -->
+<div id="app" style="display:none;">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M3 18L9 8l4 6 3-4 5 8H3z" stroke="#04211d" stroke-width="1.8" stroke-linejoin="round"/></svg></div>
+      <div>
+        <div class="brand-name">SmartLandslide</div>
+        <div class="brand-sub">EARLY WARNING SYSTEM</div>
+      </div>
+    </div>
+    <nav class="navlist" id="nav-desktop"></nav>
+    <div class="sidebar-foot">
+      <div class="status-row"><span class="dot" id="sys-dot"></span><span id="sys-text">System Online</span></div>
+      <div class="status-row" style="opacity:.75;"><span>Updated</span><span id="sys-updated" style="margin-left:auto;"></span></div>
+      <button class="navitem" onclick="go('settings')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.34 1.87l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.87-.34 1.7 1.7 0 00-1 1.55V21a2 2 0 01-4 0v-.09A1.7 1.7 0 008.6 19.4a1.7 1.7 0 00-1.87.34l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.7 1.7 0 004.24 15a1.7 1.7 0 00-1.55-1H2.6a2 2 0 010-4h.09A1.7 1.7 0 004.24 9a1.7 1.7 0 00-.34-1.87l-.06-.06a2 2 0 112.83-2.83l.06.06A1.7 1.7 0 008.6 4.6a1.7 1.7 0 001-1.55V3a2 2 0 014 0v.09a1.7 1.7 0 001 1.55 1.7 1.7 0 001.87-.34l.06-.06a2 2 0 112.83 2.83l-.06.06A1.7 1.7 0 0019.4 9c.14.36.5 1 1.55 1H21a2 2 0 010 4h-.09a1.7 1.7 0 00-1.55 1z"/></svg>
+        Settings
+      </button>
+    </div>
+  </aside>
+ 
+  <!-- MOBILE DRAWER -->
+  <div class="drawer" id="drawer">
+    <div class="scrim" onclick="toggleDrawer(false)"></div>
+    <div class="panel">
+      <div class="brand"><div class="brand-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M3 18L9 8l4 6 3-4 5 8H3z" stroke="#04211d" stroke-width="1.8" stroke-linejoin="round"/></svg></div><div><div class="brand-name">SmartLandslide</div></div></div>
+      <nav class="navlist" id="nav-drawer"></nav>
+    </div>
+  </div>
+ 
+  <!-- MAIN -->
+  <div class="main">
+    <header class="topbar">
+      <button class="hamburger" onclick="toggleDrawer(true)" aria-label="Open menu">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <div>
+        <h1 id="page-title">Overview</h1>
+        <div class="sub" id="page-sub">Real-time environmental parameters and prototype AI risk assessment.</div>
+      </div>
+      <div class="topbar-right">
+        <span class="pill on"><span class="dot"></span>ONLINE</span>
+        <span class="pill" id="mode-pill">DEMO MODE</span>
+      </div>
+    </header>
+ 
+    <div class="content">
+ 
+      <!-- ============ LANDING ============ -->
+      <section class="page" data-page="landing">
+        <div class="hero">
+          <div class="hero-badge demo-tag">PROTOTYPE • LIVE DEMO</div>
+          <h1>Monitor the mountain.<br>Understand the <span class="accent">risk</span>.<br>Warn before disaster.</h1>
+          <p>SmartLandslide is an integrated prototype that combines environmental monitoring, sensor data and AI-based risk classification to provide early awareness of potential landslide conditions across the North Eastern Region.</p>
+          <div class="hero-cta">
+            <button class="btn btn-primary" onclick="go('overview')">Open Monitoring Dashboard</button>
+            <button class="btn btn-ghost" onclick="go('aimodel')">Explore How It Works</button>
+          </div>
+          <div class="terrain-viz"><svg id="hero-terrain" viewBox="0 0 900 290" preserveAspectRatio="none"></svg></div>
+          <div class="pillars-strip">
+            <div class="pillar-mini"><div class="k">CIVIL</div><div class="v">Terrain & risk framing</div></div>
+            <div class="pillar-mini"><div class="k">ECE</div><div class="v">Sensors & hardware</div></div>
+            <div class="pillar-mini"><div class="k">AI / ML</div><div class="v">Risk classification</div></div>
+            <div class="pillar-mini"><div class="k">CSE</div><div class="v">Backend & dashboard</div></div>
+          </div>
+        </div>
+      </section>
+ 
+      <!-- ============ OVERVIEW ============ -->
+      <section class="page" data-page="overview">
+        <div class="grid g-stats" id="overview-stats"></div>
+ 
+        <div class="section-head"><h2>Sensor snapshot</h2><span class="desc mono">DEMO / SIMULATED DATA</span></div>
+        <div class="grid g-stats" id="overview-sensors"></div>
+ 
+        <div class="section-head"><h2>Active alerts</h2><button class="btn btn-sm" onclick="go('alerts')">View all</button></div>
+        <div class="card" id="overview-alerts"></div>
+      </section>
+ 
+      <!-- ============ LIVE MONITORING ============ -->
+      <section class="page" data-page="live">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:16px;">
+          <span class="demo-tag">DEMO / SIMULATED SENSOR STREAM</span>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-dim);">
+              Auto Refresh
+              <button class="switch on" id="auto-refresh-switch" onclick="toggleAutoRefresh()"><span class="knob"></span></button>
+            </label>
+            <button class="btn btn-sm" onclick="manualRefresh()">↻ Refresh Data</button>
+          </div>
+        </div>
+        <div class="grid g-stats" id="live-sensors"></div>
+ 
+        <div class="section-head"><h2>Sensor → alert data flow</h2><span class="desc">How a reading becomes a warning</span></div>
+        <div class="card"><div class="pipeline" id="live-pipeline"></div></div>
+      </section>
+ 
+      <!-- ============ RISK ANALYSIS ============ -->
+      <section class="page" data-page="risk">
+        <div class="grid g-2">
+          <div class="card">
+            <div class="eyebrow">PROTOTYPE RISK ESTIMATE</div>
+            <div class="risk-score-big" id="risk-score-big">—</div>
+            <div id="risk-level-badge"></div>
+            <div class="risk-bar-track"><div class="risk-bar-fill" id="risk-bar-fill"></div></div>
+            <div style="font-size:12px; color:var(--ink-faint); margin-top:8px;" id="risk-station-line">Demo Station A · —</div>
+          </div>
+          <div class="card">
+            <div class="eyebrow">CURRENT INPUT PARAMETERS</div>
+            <div id="risk-inputs" style="margin-top:10px; display:flex; flex-direction:column; gap:10px;"></div>
+          </div>
+        </div>
+ 
+        <div class="section-head"><h2>Prototype model interpretation</h2><span class="desc">Not scientifically validated feature importance</span></div>
+        <div class="card" id="risk-contributions"></div>
+ 
+        <div class="section-head"><h2>Contributing factors</h2></div>
+        <div class="card">
+          <ul id="risk-factors-list" style="margin:0; padding-left:18px; color:var(--ink-dim); font-size:13px; line-height:2;"></ul>
+        </div>
+      </section>
+ 
+      <!-- ============ SENSORS ============ -->
+      <section class="page" data-page="sensors">
+        <div class="section-head" style="margin-top:0;"><h2>Sensor health</h2><span class="desc mono">8 / 8 ONLINE (DEMO)</span></div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Sensor</th><th>Type</th><th>Status</th><th>Value</th><th>Last update</th><th>Battery</th><th></th></tr></thead>
+            <tbody id="sensor-table-body"></tbody>
+          </table>
+        </div>
+      </section>
+ 
+      <!-- ============ MAP ============ -->
+      <section class="page" data-page="map">
+        <div class="map-filters" id="map-filters"></div>
+        <div class="map-wrap">
+          <svg id="map-svg" class="map-svg" viewBox="0 0 900 440"></svg>
+          <div class="station-popup" id="station-popup"></div>
+        </div>
+        <p style="font-size:11.5px; color:var(--ink-faint); margin-top:10px;">Station positions are illustrative demo placements over a stylized terrain map of the North Eastern Region — not surveyed geographic coordinates.</p>
+      </section>
+ 
+      <!-- ============ ALERTS ============ -->
+      <section class="page" data-page="alerts">
+        <div id="alert-banner-slot"></div>
+        <div class="card" id="alerts-list"></div>
+ 
+        <div class="section-head"><h2>Alert workflow</h2><span class="desc">From reading to human review</span></div>
+        <div class="card"><div class="pipeline" id="alert-pipeline"></div></div>
+        <p style="font-size:11.5px; color:var(--ink-faint); margin-top:10px;">This system does not issue evacuation or emergency decisions automatically. All elevated-risk alerts require human review — always follow official disaster-management guidance.</p>
+      </section>
+ 
+      <!-- ============ ANALYTICS ============ -->
+      <section class="page" data-page="analytics">
+        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
+          <span class="demo-tag">SIMULATED HISTORICAL DATA</span>
+          <div class="map-filters" id="analytics-time-filters" style="margin:0;"></div>
+        </div>
+        <div class="grid g-2">
+          <div class="card"><div class="eyebrow">RAINFALL VS RISK SCORE</div><canvas id="chart-rainfall-risk" height="180"></canvas></div>
+          <div class="card"><div class="eyebrow">SOIL MOISTURE TREND</div><canvas id="chart-soil" height="180"></canvas></div>
+          <div class="card"><div class="eyebrow">GROUND TILT TREND</div><canvas id="chart-tilt" height="180"></canvas></div>
+          <div class="card"><div class="eyebrow">RISK LEVEL OVER TIME</div><canvas id="chart-risklevel" height="180"></canvas></div>
+        </div>
+        <div class="section-head"><h2>Alert frequency</h2></div>
+        <div class="card"><canvas id="chart-alertfreq" height="140"></canvas></div>
+      </section>
+ 
+      <!-- ============ AI MODEL ============ -->
+      <section class="page" data-page="aimodel">
+        <div class="section-head" style="margin-top:0;"><h2>Prototype ML pipeline</h2></div>
+        <div class="card"><div class="pipeline" id="model-pipeline"></div></div>
+ 
+        <div class="grid g-2" style="margin-top:18px;">
+          <div class="card">
+            <div class="eyebrow">MODEL INFORMATION</div>
+            <div style="margin-top:12px; display:flex; flex-direction:column; gap:11px; font-size:13px;">
+              <div style="display:flex; justify-content:space-between;"><span style="color:var(--ink-faint);">Model</span><span class="mono">Random Forest Classifier</span></div>
+              <div style="display:flex; justify-content:space-between;"><span style="color:var(--ink-faint);">Input features</span><span class="mono">5</span></div>
+              <div style="display:flex; justify-content:space-between;"><span style="color:var(--ink-faint);">Output classes</span><span class="mono">LOW / MEDIUM / HIGH</span></div>
+              <div style="display:flex; justify-content:space-between;"><span style="color:var(--ink-faint);">Training status</span><span class="badge badge-cyan">Prototype-trained</span></div>
+              <div style="display:flex; justify-content:space-between;"><span style="color:var(--ink-faint);">Model version</span><span class="mono">v0.3-demo</span></div>
+              <div style="display:flex; justify-content:space-between;"><span style="color:var(--ink-faint);">Last updated</span><span class="mono" id="model-updated">—</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="eyebrow">WHY MACHINE LEARNING?</div>
+            <p style="font-size:13px; color:var(--ink-dim); line-height:1.7; margin-top:12px;">Machine learning can combine multiple environmental parameters and classify observed conditions into predefined risk categories based on the training data. In this prototype, a Random Forest model maps rainfall, soil moisture, ground tilt, ground movement and temperature onto a LOW / MEDIUM / HIGH risk class.</p>
+            <p style="font-size:12px; color:var(--ink-faint); line-height:1.6; margin-top:10px;">No specific accuracy figure is claimed here, since this prototype has not undergone field-validated model evaluation.</p>
+          </div>
+        </div>
+      </section>
+ 
+      <!-- ============ ABOUT ============ -->
+      <section class="page" data-page="about">
+        <div class="section-head" style="margin-top:0;"><h2>About the project</h2><span class="desc">A four-domain collaboration</span></div>
+        <div class="grid g-2" id="about-pillars"></div>
+ 
+        <div class="section-head"><h2>Project workflow</h2></div>
+        <div class="workflow" id="about-workflow"></div>
+      </section>
+ 
+      <!-- ============ SETTINGS / SIMULATION ============ -->
+      <section class="page" data-page="settings">
+        <div class="section-head" style="margin-top:0;"><h2>Simulation mode</h2><span class="desc">Demonstrate the system without hardware</span></div>
+        <div class="grid g-2">
+          <div class="card">
+            <div class="toggle-row">
+              <div class="l"><div class="t">Simulation mode</div><div class="d">Override live demo stream with manual inputs</div></div>
+              <button class="switch" id="sim-switch" onclick="toggleSimMode()"><span class="knob"></span></button>
+            </div>
+            <div id="sim-sliders" style="margin-top:18px;"></div>
+            <button class="btn btn-primary" style="width:100%; justify-content:center;" onclick="runRiskAnalysis()" id="run-analysis-btn" disabled>Run Risk Analysis</button>
+          </div>
+          <div class="card">
+            <div class="eyebrow">DEMO SCENARIOS</div>
+            <div class="preset-row" id="preset-row"></div>
+            <hr class="line">
+            <div class="eyebrow">HARDWARE INTEGRATION</div>
+            <div style="margin-top:12px; font-size:12.5px; color:var(--ink-dim); line-height:1.7;">
+              ESP32 node connects rainfall, soil moisture, MPU6050 tilt and temperature sensors over Wi-Fi to the backend API.
+            </div>
+            <div class="toggle-row" style="border-bottom:none; padding-bottom:0;">
+              <div class="l"><div class="t">Hardware status</div><div class="d">Physical ESP32 node</div></div>
+              <span class="badge badge-neutral">Disconnected</span>
+            </div>
+          </div>
+        </div>
+ 
+        <div class="section-head"><h2>System</h2></div>
+        <div class="card">
+          <div class="toggle-row"><div class="l"><div class="t">Demo mode</div><div class="d">Use simulated sensors, alerts and map markers</div></div><button class="switch on" id="demo-switch" onclick="toggleDemoMode()"><span class="knob"></span></button></div>
+          <div class="toggle-row"><div class="l"><div class="t">Role</div><div class="d">Signed in as</div></div><span class="badge badge-cyan" id="settings-role">Administrator</span></div>
+          <div class="toggle-row" id="threshold-row"><div class="l"><div class="t">Configure alert thresholds</div><div class="d">Admin only — rainfall / soil / tilt trigger points</div></div><button class="btn btn-sm">Configure</button></div>
+        </div>
+      </section>
+ 
+    </div>
+ 
+    <footer class="footer-app">
+      <div class="grid-f">
+        <div>
+          <div class="brand-name">SmartLandslide</div>
+          <div style="font-size:12px; color:var(--ink-faint); margin-top:4px;">AI-Based Early Warning & Landslide Risk Monitoring System</div>
+        </div>
+        <div class="footer-links">
+          <a href="#" onclick="go('overview');return false;">Dashboard</a>
+          <a href="#" onclick="go('aimodel');return false;">Architecture</a>
+          <a href="#" onclick="go('about');return false;">About</a>
+        </div>
+      </div>
+      <div class="note">Prototype for innovation and demonstration purposes. Data shown in demonstration mode may be simulated and should not be interpreted as an official disaster warning. Always follow official disaster-management guidance.</div>
+    </footer>
+  </div>
+</div>
+ 
+<!-- MOBILE BOTTOM NAV -->
+<nav class="mobile-nav"><div class="row" id="nav-mobile"></div></nav>
+<div id="toast-wrap"></div>
+ 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script>
+/* ================= NAV CONFIG ================= */
+const ICONS = {
+  overview:'<path d="M4 13h6V4H4v9zm0 7h6v-5H4v5zm10 0h6V11h-6v9zm0-16v5h6V4h-6z"/>',
+  live:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
+  risk:'<path d="M12 2l9 16H3l9-16z"/><path d="M12 9v4M12 16h.01"/>',
+  sensors:'<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/>',
+  map:'<path d="M9 20l-6-2V4l6 2 6-2 6 2v14l-6-2-6 2z"/><path d="M9 4v16M15 6v14"/>',
+  alerts:'<path d="M12 3l9 16H3l9-16z"/><path d="M12 10v4M12 17h.01"/>',
+  analytics:'<path d="M4 20V10M11 20V4M18 20v-7"/>',
+  aimodel:'<circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l2.8 2.8M16.2 16.2L19 19M19 5l-2.8 2.8M7.8 16.2L5 19"/>',
+  about:'<circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/>',
+};
+const NAV = [
+  {id:'overview', label:'Overview'},
+  {id:'live', label:'Live Monitoring'},
+  {id:'risk', label:'Risk Analysis'},
+  {id:'sensors', label:'Sensors'},
+  {id:'map', label:'Monitoring Map'},
+  {id:'alerts', label:'Alerts'},
+  {id:'analytics', label:'Analytics'},
+  {id:'aimodel', label:'AI Model'},
+  {id:'about', label:'About'},
+];
+const PAGE_META = {
+  landing:{t:'SmartLandslide', s:'AI-based early warning & landslide risk monitoring'},
+  overview:{t:'Landslide Risk Monitoring', s:'Real-time environmental parameters and prototype AI risk assessment.'},
+  live:{t:'Live Monitoring', s:'Simulated sensor stream · updates every few seconds.'},
+  risk:{t:'AI Risk Analysis', s:'Prototype AI risk classification and contributing factors.'},
+  sensors:{t:'Sensor Health', s:'Status and battery for all monitoring nodes.'},
+  map:{t:'Monitoring Stations', s:'Demo station placements across the North Eastern Region.'},
+  alerts:{t:'Early Warning Center', s:'Review required — not an automated emergency decision.'},
+  analytics:{t:'Historical Analytics', s:'Simulated trend data across monitored parameters.'},
+  aimodel:{t:'AI Model Information', s:'How the prototype risk classifier works.'},
+  about:{t:'About the Project', s:'A four-domain engineering collaboration.'},
+  settings:{t:'Settings', s:'Simulation mode, demo mode and system configuration.'},
+};
+ 
+function svgIcon(name){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`; }
+ 
+function buildNav(){
+  const mk = (list, withLabel) => list.map(item=>`
+    <button class="navitem" data-nav="${item.id}" onclick="go('${item.id}')">
+      ${svgIcon(item.id)}<span>${item.label}</span>
+    </button>`).join('');
+  document.getElementById('nav-desktop').innerHTML = mk(NAV);
+  document.getElementById('nav-drawer').innerHTML = mk(NAV);
+  const mobileList = [{id:'overview',label:'Overview'},{id:'live',label:'Live'},{id:'risk',label:'Risk'},{id:'map',label:'Map'},{id:'alerts',label:'Alerts'},{id:'settings',label:'More'}];
+  document.getElementById('nav-mobile').innerHTML = mobileList.map(item=>`
+    <button class="item" data-nav="${item.id}" onclick="go('${item.id}')">
+      ${svgIcon(item.id==='settings'?'about':item.id)}<span>${item.label}</span>
+    </button>`).join('');
+}
+ 
+let currentPage = 'landing';
+function go(id){
+  currentPage = id;
+  document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active', p.dataset.page===id));
+  document.querySelectorAll('[data-nav]').forEach(n=>n.classList.toggle('active', n.dataset.nav===id));
+  const meta = PAGE_META[id] || PAGE_META.overview;
+  document.getElementById('page-title').textContent = meta.t;
+  document.getElementById('page-sub').textContent = meta.s;
+  toggleDrawer(false);
+  window.scrollTo({top:0, behavior:'instant' in window ? 'instant':'auto'});
+  location.hash = id;
+}
+function toggleDrawer(open){ document.getElementById('drawer').classList.toggle('open', !!open); }
+ 
+/* ================= ROLE / LOGIN ================= */
+const ROLES = [
+  {id:'admin', name:'Administrator', desc:'Full access — sensors, alerts, analytics, thresholds', ic:'⚙'},
+  {id:'monitor', name:'Monitoring User', desc:'View dashboard, sensors, alerts and analytics', ic:'👁'},
+];
+let selectedRole = 'admin';
+function renderRoles(){
+  document.getElementById('role-options').innerHTML = ROLES.map(r=>`
+    <div class="role-opt ${r.id===selectedRole?'sel':''}" onclick="selectRole('${r.id}')">
+      <div class="ic">${r.ic}</div>
+      <div><div class="t">${r.name}</div><div class="d">${r.desc}</div></div>
+    </div>`).join('');
+}
+function selectRole(id){ selectedRole = id; renderRoles(); }
+function enterApp(){
+  document.getElementById('login-gate').style.display='none';
+  document.getElementById('app').style.display='flex';
+  document.getElementById('settings-role').textContent = selectedRole==='admin' ? 'Administrator' : 'Monitoring User';
+  document.getElementById('threshold-row').style.display = selectedRole==='admin' ? 'flex' : 'none';
+  go(location.hash ? location.hash.slice(1) : 'landing');
+}
+renderRoles();
+ 
+/* ================= STATE ================= */
+const state = {
+  rainfall:72, soil:78, tilt:4.2, movement:12, temperature:27.4,
+  simMode:false, demoMode:true, autoRefresh:true,
+  history:{rain:[],soil:[],tilt:[],risk:[],time:[]},
+  alerts:[],
+};
+ 
+function computeRisk(v){
+  const rainC = Math.min(v.rainfall/150,1)*35;
+  const soilC = Math.min(v.soil/100,1)*30;
+  const tiltC = Math.min(v.tilt/10,1)*20;
+  const moveC = Math.min(v.movement/50,1)*10;
+  const tempC = Math.max(0,(v.temperature-35)/15)*5;
+  const score = Math.max(0, Math.min(100, rainC+soilC+tiltC+moveC+tempC));
+  let level = 'LOW';
+  if(score>=70) level='HIGH'; else if(score>=40) level='MEDIUM';
+  return {score:Math.round(score), level, parts:{rainC,soilC,tiltC,moveC,tempC}};
+}
+function riskColor(level){ return level==='HIGH'?'var(--red)':level==='MEDIUM'?'var(--amber)':'var(--green)'; }
+function riskBadgeClass(level){ return level==='HIGH'?'badge-high':level==='MEDIUM'?'badge-med':'badge-low'; }
+ 
+function pad(n){return n.toString().padStart(2,'0');}
+function nowStr(){ const d=new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; }
+ 
+/* ================= STATION / SENSOR DATA ================= */
+const STATIONS = [
+  {id:'A', name:'Demo Station A', x:330, y:150, rainfall:72, soil:78, tilt:4.2, status:'online'},
+  {id:'B', name:'Demo Station B', x:520, y:110, rainfall:41, soil:52, tilt:1.8, status:'online'},
+  {id:'C', name:'Demo Station C', x:430, y:260, rainfall:18, soil:34, tilt:0.9, status:'online'},
+  {id:'D', name:'Demo Station D', x:640, y:230, rainfall:0, soil:0, tilt:0, status:'offline'},
+];
+function stationRisk(s){ if(s.status==='offline') return {score:0,level:'OFFLINE'}; return computeRisk({rainfall:s.rainfall,soil:s.soil,tilt:s.tilt,movement:s.tilt*3,temperature:26}); }
+ 
+const SENSOR_DEFS = [
+  {key:'rainfall', name:'Rainfall Sensor', id:'Rain-01', unit:'mm/hr', battery:92, thresh:v=>v>60?'HIGH':v>30?'ELEVATED':'NORMAL'},
+  {key:'soil', name:'Soil Moisture', id:'Soil-01', unit:'%', battery:87, thresh:v=>v>70?'ELEVATED':v>45?'MODERATE':'NORMAL'},
+  {key:'tilt', name:'Ground Tilt', id:'Tilt-01', unit:'°', battery:81, thresh:v=>v>3.5?'ELEVATED':v>1.5?'MODERATE':'NORMAL'},
+  {key:'temperature', name:'Temperature', id:'Temp-01', unit:'°C', battery:95, thresh:v=>v>38?'HIGH':'NORMAL'},
+  {key:'movement', name:'Ground Movement', id:'Move-01', unit:'mm', battery:88, thresh:v=>v>25?'MONITOR':v>10?'MONITOR':'NORMAL'},
+];
+const sparkData = {}; SENSOR_DEFS.forEach(s=> sparkData[s.key] = Array.from({length:16},()=>state[s.key]*(0.9+Math.random()*0.2)));
+ 
+function statusBadgeClass(s){ return s==='HIGH'||s==='ELEVATED' ? 'badge-med' : s==='NORMAL' ? 'badge-low' : 'badge-neutral'; }
+ 
+/* ================= RENDER: OVERVIEW ================= */
+function renderOverview(){
+  const risk = computeRisk(state);
+  document.getElementById('overview-stats').innerHTML = `
+    <div class="card risk-card">
+      <div class="top"><span class="eyebrow">PROTOTYPE RISK ESTIMATE</span><span class="badge ${riskBadgeClass(risk.level)}">${risk.level} RISK</span></div>
+      <div class="risk-score-big" style="color:${riskColor(risk.level)}">${risk.score}<span style="font-size:16px;color:var(--ink-faint);">/100</span></div>
+      <div class="risk-bar-track"><div class="risk-bar-fill" style="width:${risk.score}%; background:${riskColor(risk.level)}"></div></div>
+      <div class="foot">Demo Station A · Updated ${nowStr()}</div>
+    </div>
+    <div class="card stat-card"><div class="lbl">Rainfall</div><div class="val">${state.rainfall.toFixed(0)} <span class="unit">mm/hr</span></div><div class="foot">Last 15 min</div></div>
+    <div class="card stat-card"><div class="lbl">Soil Moisture</div><div class="val">${state.soil.toFixed(0)}<span class="unit">%</span></div><div class="foot">Topsoil layer</div></div>
+    <div class="card stat-card"><div class="lbl">Ground Tilt</div><div class="val">${state.tilt.toFixed(1)}<span class="unit">°</span></div><div class="foot">MPU6050 demo</div></div>
+    <div class="card stat-card"><div class="lbl">Active Sensors</div><div class="val">8<span class="unit">/8 Online</span></div><div class="foot">All nodes reporting</div></div>
+    <div class="card stat-card"><div class="lbl">Active Alerts</div><div class="val">${state.alerts.filter(a=>!a.ack).length}</div><div class="foot">Requiring review</div></div>
+  `;
+  document.getElementById('overview-sensors').innerHTML = SENSOR_DEFS.map(s=>{
+    const v = state[s.key]; const st = s.thresh(v);
+    return `<div class="card stat-card"><div class="lbl">${s.name}<span class="badge ${statusBadgeClass(st)}">${st}</span></div><div class="val">${v.toFixed(1)}<span class="unit">${s.unit}</span></div><div class="foot mono">${s.id}</div></div>`;
+  }).join('');
+  const al = state.alerts.slice(0,3);
+  document.getElementById('overview-alerts').innerHTML = al.length ? al.map(a=>alertRow(a)).join('<hr class="line">') : emptyState('No active alerts','All monitored parameters are within configured thresholds.');
+}
+ 
+/* ================= RENDER: LIVE ================= */
+let sparkCharts = {};
+function renderLive(){
+  document.getElementById('live-sensors').innerHTML = SENSOR_DEFS.map(s=>{
+    const v = state[s.key]; const st = s.thresh(v);
+    return `<div class="card sensor-card">
+      <div class="head"><span class="name">${s.name}</span><span class="badge ${statusBadgeClass(st)}">${st}</span></div>
+      <div class="value">${v.toFixed(1)}<span class="unit" style="font-size:13px;color:var(--ink-faint);"> ${s.unit}</span></div>
+      <canvas id="spark-${s.key}"></canvas>
+      <div class="meta">Updated ${nowStr()}</div>
+    </div>`;
+  }).join('');
+  requestAnimationFrame(()=>{
+    SENSOR_DEFS.forEach(s=>{
+      const ctx = document.getElementById('spark-'+s.key);
+      if(!ctx) return;
+      if(sparkCharts[s.key]) sparkCharts[s.key].destroy();
+      sparkCharts[s.key] = new Chart(ctx, {
+        type:'line',
+        data:{labels:sparkData[s.key].map((_,i)=>i), datasets:[{data:sparkData[s.key], borderColor:'#3fd6cf', borderWidth:1.5, pointRadius:0, tension:0.35, fill:true, backgroundColor:'rgba(63,214,207,0.08)'}]},
+        options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false},tooltip:{enabled:false}}, scales:{x:{display:false},y:{display:false}}, animation:false}
+      });
+    });
+  });
+  renderPipeline('live-pipeline', ['Sensors','Data Collection','Backend','AI Model','Risk Score','Dashboard','Alert']);
+}
+ 
+function renderPipeline(elId, steps){
+  const icons = ['<path d="M4 6h16M4 12h10M4 18h7"/>','<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>','<rect x="4" y="7" width="16" height="10" rx="2"/><path d="M9 21h6"/>','<circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>','<path d="M12 2l9 16H3z"/>','<rect x="3" y="4" width="18" height="14" rx="2"/><path d="M7 20h10"/>','<path d="M12 3l9 16H3z"/><path d="M12 10v4"/>'];
+  document.getElementById(elId).innerHTML = steps.map((s,i)=>`
+    <div class="pipe-node"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">${icons[i%icons.length]}</svg></div><div class="t">${s}</div></div>
+    ${i<steps.length-1?'<div class="pipe-arrow">→</div>':''}
+  `).join('');
+}
+ 
+/* ================= RENDER: RISK ANALYSIS ================= */
+function renderRisk(){
+  const risk = computeRisk(state);
+  document.getElementById('risk-score-big').textContent = risk.score + ' / 100';
+  document.getElementById('risk-score-big').style.color = riskColor(risk.level);
+  document.getElementById('risk-level-badge').innerHTML = `<span class="badge ${riskBadgeClass(risk.level)}">${risk.level} RISK</span>`;
+  document.getElementById('risk-bar-fill').style.width = risk.score+'%';
+  document.getElementById('risk-bar-fill').style.background = riskColor(risk.level);
+  document.getElementById('risk-station-line').textContent = `Demo Station A · Updated ${nowStr()}`;
+ 
+  document.getElementById('risk-inputs').innerHTML = SENSOR_DEFS.map(s=>`
+    <div style="display:flex; justify-content:space-between; font-size:13px;">
+      <span style="color:var(--ink-faint);">${s.name}</span><span class="mono">${state[s.key].toFixed(1)} ${s.unit}</span>
+    </div>`).join('');
+ 
+  const total = Object.values(risk.parts).reduce((a,b)=>a+b,0) || 1;
+  const contribDefs = [
+    {label:'Rainfall', v:risk.parts.rainC},
+    {label:'Soil Moisture', v:risk.parts.soilC},
+    {label:'Ground Tilt', v:risk.parts.tiltC},
+    {label:'Ground Movement', v:risk.parts.moveC},
+    {label:'Temperature', v:risk.parts.tempC},
+  ];
+  document.getElementById('risk-contributions').innerHTML = contribDefs.map(c=>{
+    const pct = Math.round((c.v/total)*100);
+    const lvl = pct>28?'High':pct>14?'Medium':'Low';
+    return `<div class="contrib-row"><div class="top"><span class="n">${c.label}</span><span class="lvl" style="color:${lvl==='High'?'var(--red)':lvl==='Medium'?'var(--amber)':'var(--ink-faint)'}">${lvl} contribution</span></div><div class="contrib-track"><div class="contrib-fill" style="width:${pct}%"></div></div></div>`;
+  }).join('');
+ 
+  const factors = contribDefs.filter(c=>c.v/total>0.14).sort((a,b)=>b.v-a.v).map(c=>`Elevated ${c.label.toLowerCase()}`);
+  document.getElementById('risk-factors-list').innerHTML = factors.length ? factors.map(f=>`<li>${f}</li>`).join('') : '<li>No individually dominant factor — conditions broadly nominal.</li>';
+}
+ 
+/* ================= RENDER: SENSORS TABLE ================= */
+function renderSensorsTable(){
+  document.getElementById('sensor-table-body').innerHTML = SENSOR_DEFS.map(s=>{
+    const v = state[s.key]; const st = s.thresh(v);
+    return `<tr>
+      <td class="mono">${s.id}</td><td>${s.name}</td>
+      <td><span class="badge badge-low">ONLINE</span></td>
+      <td class="mono">${v.toFixed(1)} ${s.unit}</td>
+      <td class="mono">${nowStr()}</td>
+      <td class="mono">${s.battery}%</td>
+      <td><button class="btn btn-sm" onclick="toast('Sensor Details — demo view for ${s.id}')">Details</button></td>
+    </tr>`;
+  }).join('');
+}
+ 
+/* ================= RENDER: MAP ================= */
+let mapFilter = 'all';
+function renderMapFilters(){
+  const filters = [['all','All Stations'],['low','Low Risk'],['medium','Medium Risk'],['high','High Risk'],['offline','Offline']];
+  document.getElementById('map-filters').innerHTML = filters.map(([id,label])=>`<button class="chip ${mapFilter===id?'active':''}" onclick="setMapFilter('${id}')">${label}</button>`).join('');
+}
+function setMapFilter(id){ mapFilter = id; renderMapFilters(); renderMap(); }
+function renderMap(){
+  const svg = document.getElementById('map-svg');
+  let terrain = `<defs>
+      <linearGradient id="terrainGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#16332b"/><stop offset="1" stop-color="#0d1c18"/>
+      </linearGradient>
+    </defs>
+    <rect width="900" height="440" fill="url(#terrainGrad)"/>`;
+  // stylized contour lines
+  for(let i=0;i<7;i++){
+    const yOff = 40+i*55;
+    terrain += `<path d="M0 ${yOff} Q150 ${yOff-30} 300 ${yOff} T600 ${yOff-10} T900 ${yOff+20}" stroke="rgba(233,242,236,0.06)" stroke-width="1.5" fill="none"/>`;
+  }
+  terrain += `<text x="20" y="30" fill="rgba(233,242,236,0.35)" font-family="IBM Plex Mono" font-size="11">NORTH EASTERN REGION — STYLIZED TERRAIN</text>`;
+  let markers='';
+  STATIONS.forEach(s=>{
+    const r = stationRisk(s);
+    const visible = mapFilter==='all' || (mapFilter==='offline' ? s.status==='offline' : (s.status!=='offline' && r.level.toLowerCase()===mapFilter));
+    if(!visible) return;
+    const color = s.status==='offline' ? '#5f766c' : riskColorHex(r.level);
+    markers += `<g class="station-dot" onclick="showStationPopup('${s.id}', event)" transform="translate(${s.x},${s.y})">
+      ${s.status!=='offline' ? `<circle class="pulse" r="7" fill="${color}"/>` : ''}
+      <circle r="8" fill="${color}" stroke="var(--bg-1)" stroke-width="2"/>
+      <text x="0" y="-14" text-anchor="middle" fill="#e9f2ec" font-family="IBM Plex Mono" font-size="11" font-weight="600">${s.id}</text>
+    </g>`;
+  });
+  svg.innerHTML = terrain + markers;
+}
+function riskColorHex(level){ return level==='HIGH'?'#e5555a':level==='MEDIUM'?'#e8a93c':level==='LOW'?'#3fbf6b':'#5f766c'; }
+function showStationPopup(id, evt){
+  const s = STATIONS.find(x=>x.id===id); const r = stationRisk(s);
+  const pop = document.getElementById('station-popup');
+  const rect = document.getElementById('map-svg').getBoundingClientRect();
+  const wrapRect = pop.parentElement.getBoundingClientRect();
+  const scaleX = rect.width/900, scaleY = rect.height/440;
+  let left = s.x*scaleX + 24, top = s.y*scaleY - 10;
+  if(left+220 > wrapRect.width) left -= 250;
+  pop.style.left = left+'px'; pop.style.top = Math.max(10,top)+'px';
+  pop.innerHTML = `<button class="close" onclick="document.getElementById('station-popup').style.display='none'">✕</button>
+    <h4>${s.name}</h4>
+    <span class="badge ${s.status==='offline'?'badge-neutral':riskBadgeClass(r.level)}" style="margin-bottom:8px;display:inline-block;">${s.status==='offline'?'OFFLINE':r.level+' RISK'}</span>
+    <div class="row"><span>Sensor status</span><span>${s.status==='offline'?'Offline':'8/8 Online'}</span></div>
+    <div class="row"><span>Rainfall</span><span>${s.status==='offline'?'—':s.rainfall+' mm/hr'}</span></div>
+    <div class="row"><span>Soil moisture</span><span>${s.status==='offline'?'—':s.soil+'%'}</span></div>
+    <div class="row"><span>Last update</span><span>${s.status==='offline'?'2h ago':nowStr()}</span></div>`;
+  pop.style.display = 'block';
+}
+ 
+/* ================= RENDER: ALERTS ================= */
+function alertRow(a){
+  return `<div class="alert-item ${a.ack?'ack':''}">
+    <span class="sev-dot" style="background:${a.sev==='HIGH'?'var(--red)':'var(--amber)'}"></span>
+    <div class="body">
+      <div class="row1"><span class="ttl">${a.title}</span><span class="badge ${a.sev==='HIGH'?'badge-high':'badge-med'}">${a.sev}</span>${a.simulated?'<span class="demo-tag">SIMULATED</span>':''}</div>
+      <div class="msg">${a.msg}</div>
+      <div class="meta">${a.station} · ${a.time}</div>
+      <div class="acts">
+        <button class="btn btn-sm" onclick="go('map')">View Station</button>
+        ${a.ack ? '<span class="badge badge-neutral">Acknowledged</span>' : `<button class="btn btn-sm btn-primary" onclick="ackAlert('${a.id}')">Acknowledge</button>`}
+      </div>
+    </div>
+  </div>`;
+}
+function ackAlert(id){ const a = state.alerts.find(x=>x.id===id); if(a){a.ack=true; renderAlerts(); renderOverview(); toast('Alert acknowledged');} }
+function renderAlerts(){
+  const risk = computeRisk(state);
+  const bannerSlot = document.getElementById('alert-banner-slot');
+  bannerSlot.innerHTML = risk.level==='HIGH' ? `
+    <div class="alert-banner">
+      <div class="ic">🚨</div>
+      <div class="txt"><strong>HIGH RISK DETECTED</strong><span>Multiple monitored parameters indicate elevated prototype risk at Demo Station A.</span></div>
+      <div class="acts">
+        <button class="btn btn-sm" onclick="go('risk')">View Analysis</button>
+        <button class="btn btn-sm" onclick="go('map')">View Station</button>
+      </div>
+    </div>` : '';
+  const active = state.alerts.filter(a=>!a.ack), past = state.alerts.filter(a=>a.ack);
+  document.getElementById('alerts-list').innerHTML = state.alerts.length ? [...active,...past].map(alertRow).join('<hr class="line">') : emptyState('No alerts yet','Alerts generated from monitored or simulated conditions will appear here.');
+  renderPipeline('alert-pipeline', ['Sensor Reading','Risk Analysis','Risk Detected','Alert Generated','Dashboard Notice','Human Review']);
+}
+ 
+/* ================= ANALYTICS ================= */
+let analyticsRange = '24h';
+const analyticsCharts = {};
+function genHistorySeries(points, base, variance){
+  const arr=[]; let v=base;
+  for(let i=0;i<points;i++){ v += (Math.random()-0.5)*variance; v=Math.max(0,v); arr.push(Math.round(v*10)/10); }
+  return arr;
+}
+function renderAnalyticsFilters(){
+  const filters=[['1h','Last 1 hour'],['6h','Last 6 hours'],['24h','Last 24 hours'],['7d','Last 7 days']];
+  document.getElementById('analytics-time-filters').innerHTML = filters.map(([id,l])=>`<button class="chip ${analyticsRange===id?'active':''}" onclick="setAnalyticsRange('${id}')">${l}</button>`).join('');
+}
+function setAnalyticsRange(id){ analyticsRange=id; renderAnalyticsFilters(); renderAnalyticsCharts(); }
+function destroyChart(id){ if(analyticsCharts[id]){analyticsCharts[id].destroy(); delete analyticsCharts[id];} }
+function renderAnalyticsCharts(){
+  const n = analyticsRange==='1h'?12:analyticsRange==='6h'?18:analyticsRange==='24h'?24:14;
+  const labels = Array.from({length:n},(_,i)=> analyticsRange==='7d' ? `D-${n-i}` : `${i}h`);
+  const rain = genHistorySeries(n,55,30);
+  const soil = genHistorySeries(n,60,18);
+  const tilt = genHistorySeries(n,2.5,1.5);
+  const riskSeries = rain.map((r,i)=>computeRisk({rainfall:r,soil:soil[i],tilt:tilt[i],movement:tilt[i]*3,temperature:27}).score);
+  const alertFreq = Array.from({length:n},()=>Math.floor(Math.random()*4));
+ 
+  const baseOpts = (yTitle)=>({responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{
+    x:{ticks:{color:'#5f766c',font:{family:'IBM Plex Mono',size:9}}, grid:{color:'rgba(233,242,236,0.06)'}},
+    y:{ticks:{color:'#5f766c',font:{family:'IBM Plex Mono',size:9}}, grid:{color:'rgba(233,242,236,0.06)'}, title:{display:!!yTitle,text:yTitle,color:'#5f766c'}}
+  }});
+ 
+  ['chart-rainfall-risk','chart-soil','chart-tilt','chart-risklevel','chart-alertfreq'].forEach(destroyChart);
+ 
+  analyticsCharts['chart-rainfall-risk'] = new Chart(document.getElementById('chart-rainfall-risk'), {
+    type:'line', data:{labels, datasets:[
+      {label:'Rainfall', data:rain, borderColor:'#3fd6cf', backgroundColor:'transparent', tension:.35, pointRadius:0, yAxisID:'y'},
+      {label:'Risk', data:riskSeries, borderColor:'#e8a93c', backgroundColor:'transparent', tension:.35, pointRadius:0, yAxisID:'y1'},
+    ]}, options:{...baseOpts(), scales:{...baseOpts().scales, y1:{position:'right', grid:{display:false}, ticks:{color:'#5f766c',font:{family:'IBM Plex Mono',size:9}}}}}
+  });
+  analyticsCharts['chart-soil'] = new Chart(document.getElementById('chart-soil'), {
+    type:'line', data:{labels, datasets:[{data:soil, borderColor:'#3fbf6b', backgroundColor:'rgba(63,191,107,0.08)', fill:true, tension:.35, pointRadius:0}]}, options:baseOpts('%')
+  });
+  analyticsCharts['chart-tilt'] = new Chart(document.getElementById('chart-tilt'), {
+    type:'line', data:{labels, datasets:[{data:tilt, borderColor:'#e8a93c', backgroundColor:'rgba(232,169,60,0.08)', fill:true, tension:.35, pointRadius:0}]}, options:baseOpts('°')
+  });
+  analyticsCharts['chart-risklevel'] = new Chart(document.getElementById('chart-risklevel'), {
+    type:'line', data:{labels, datasets:[{data:riskSeries, borderColor:'#e5555a', backgroundColor:'rgba(229,85,90,0.10)', fill:true, tension:.35, pointRadius:0}]}, options:baseOpts('score')
+  });
+  analyticsCharts['chart-alertfreq'] = new Chart(document.getElementById('chart-alertfreq'), {
+    type:'bar', data:{labels, datasets:[{data:alertFreq, backgroundColor:'#3fd6cf'}]}, options:baseOpts('count')
+  });
+}
+ 
+/* ================= AI MODEL ================= */
+function renderModel(){
+  renderPipeline('model-pipeline', ['Sensor Data','Preprocessing','Feature Extraction','ML Classifier','Risk Score','LOW / MED / HIGH']);
+  document.getElementById('model-updated').textContent = new Date().toLocaleDateString();
+}
+ 
+/* ================= ABOUT ================= */
+const PILLARS = [
+  {tag:'CIVIL ENGINEERING', title:'Civil Engineering', items:['Landslide-related environmental parameters','Terrain considerations','Soil and rainfall interpretation','Risk monitoring requirements']},
+  {tag:'ECE', title:'ECE', items:['ESP32 microcontroller','Environmental sensors','Data acquisition','Wireless communication']},
+  {tag:'AI / ML', title:'AI / ML', items:['Dataset preparation','Feature engineering','Risk classification','Model evaluation']},
+  {tag:'CSE', title:'CSE', items:['Backend & API','Database','Dashboard','System integration']},
+];
+function renderAbout(){
+  document.getElementById('about-pillars').innerHTML = PILLARS.map(p=>`
+    <div class="card pillar-card"><div class="tag">${p.tag}</div><h3>${p.title}</h3><ul>${p.items.map(i=>`<li>${i}</li>`).join('')}</ul></div>
+  `).join('');
+  const wf = [
+    ['SENSE','Environmental sensors collect parameters.'],
+    ['COLLECT','ESP32 transfers the readings.'],
+    ['ANALYZE','Backend processes the data.'],
+    ['PREDICT','AI/ML classifies the current risk.'],
+    ['MONITOR','Dashboard visualizes conditions.'],
+    ['WARN','Alerts notify users for review.'],
+  ];
+  document.getElementById('about-workflow').innerHTML = wf.map((w,i)=>`
+    <div class="wf-step"><div class="wf-num">${i+1}</div><div class="t">${w[0]}</div><div class="d">${w[1]}</div></div>
+    ${i<wf.length-1?'<div class="wf-connector">→</div>':''}
+  `).join('');
+}
+ 
+/* ================= SETTINGS / SIMULATION ================= */
+const SIM_FIELDS = [
+  {key:'rainfall', label:'Rainfall', min:0, max:150, step:1, unit:'mm/hr'},
+  {key:'soil', label:'Soil Moisture', min:0, max:100, step:1, unit:'%'},
+  {key:'tilt', label:'Ground Tilt', min:0, max:10, step:0.1, unit:'°'},
+  {key:'movement', label:'Ground Movement', min:0, max:50, step:1, unit:'mm'},
+  {key:'temperature', label:'Temperature', min:10, max:50, step:0.5, unit:'°C'},
+];
+function renderSimSliders(){
+  document.getElementById('sim-sliders').innerHTML = SIM_FIELDS.map(f=>`
+    <div class="sim-field">
+      <div class="lbl"><span>${f.label}</span><b id="sim-val-${f.key}">${state[f.key]} ${f.unit}</b></div>
+      <input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${state[f.key]}" ${state.simMode?'':'disabled'} oninput="updateSimField('${f.key}', this.value, '${f.unit}')">
+    </div>`).join('');
+}
+function updateSimField(key, val, unit){ state[key] = parseFloat(val); document.getElementById('sim-val-'+key).textContent = `${val} ${unit}`; }
+ 
+function toggleSimMode(){
+  state.simMode = !state.simMode;
+  document.getElementById('sim-switch').classList.toggle('on', state.simMode);
+  document.getElementById('run-analysis-btn').disabled = !state.simMode;
+  renderSimSliders();
+  toast(state.simMode ? 'Simulation mode enabled — adjust sliders and run analysis' : 'Simulation mode disabled — resuming demo stream');
+}
+function toggleDemoMode(){
+  state.demoMode = !state.demoMode;
+  document.getElementById('demo-switch').classList.toggle('on', state.demoMode);
+  document.getElementById('mode-pill').textContent = state.demoMode ? 'DEMO MODE' : 'LIVE MODE';
+  toast(state.demoMode ? 'Demo mode enabled' : 'Demo mode disabled');
+}
+function toggleAutoRefresh(){
+  state.autoRefresh = !state.autoRefresh;
+  document.getElementById('auto-refresh-switch').classList.toggle('on', state.autoRefresh);
+}
+ 
+const PRESETS = [
+  {id:'normal', label:'Normal Conditions', desc:'Low risk baseline', ic:'🟢', vals:{rainfall:12,soil:28,tilt:0.6,movement:3,temperature:24}},
+  {id:'rain', label:'Heavy Rainfall', desc:'Medium risk scenario', ic:'🟡', vals:{rainfall:88,soil:74,tilt:3.1,movement:14,temperature:23}},
+  {id:'critical', label:'Critical Conditions', desc:'High risk scenario', ic:'🔴', vals:{rainfall:132,soil:91,tilt:7.8,movement:38,temperature:25}},
+];
+function renderPresets(){
+  document.getElementById('preset-row').innerHTML = PRESETS.map(p=>`
+    <button class="preset-btn" onclick="applyPreset('${p.id}')"><div class="t">${p.ic} ${p.label}</div><div class="d">${p.desc}</div></button>
+  `).join('');
+}
+function applyPreset(id){
+  const p = PRESETS.find(x=>x.id===id); if(!p) return;
+  if(!state.simMode) toggleSimMode();
+  Object.assign(state, p.vals);
+  renderSimSliders();
+  runRiskAnalysis(true);
+  toast(`Loaded scenario: ${p.label}`);
+}
+ 
+function runRiskAnalysis(silent){
+  const risk = computeRisk(state);
+  maybeGenerateAlert(risk);
+  renderAll();
+  if(!silent) toast(`Risk analysis complete — ${risk.level} (${risk.score}/100)`);
+}
+ 
+let alertSeq = 1;
+function maybeGenerateAlert(risk){
+  if(risk.level==='LOW') return;
+  const contribs = [
+    {label:'rainfall', v:state.rainfall, thresh:60, title:'HIGH RAINFALL ALERT', msg:'Rainfall has exceeded the configured monitoring threshold.'},
+    {label:'movement', v:state.movement, thresh:20, title:'GROUND MOVEMENT ALERT', msg:'Ground movement has increased compared with the previous monitoring interval.'},
+    {label:'tilt', v:state.tilt, thresh:5, title:'GROUND TILT ALERT', msg:'Ground tilt readings exceed the configured safe range.'},
+  ];
+  const trigger = contribs.find(c=>c.v>c.thresh);
+  if(!trigger) return;
+  const exists = state.alerts.find(a=>a.title===trigger.title && !a.ack);
+  if(exists) return;
+  state.alerts.unshift({
+    id:'AL'+(alertSeq++), title:trigger.title, msg:trigger.msg, sev:risk.level, station:'Demo Station A',
+    time:nowStr(), ack:false, simulated: state.simMode || state.demoMode,
+  });
+}
+ 
+/* ================= HERO TERRAIN ANIMATION ================= */
+function renderHeroTerrain(){
+  const svg = document.getElementById('hero-terrain');
+  let s = `<defs><linearGradient id="hg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#16332b"/><stop offset="1" stop-color="#0d1c18"/></linearGradient></defs>
+  <rect width="900" height="290" fill="url(#hg)"/>`;
+  s += `<path d="M0 210 L120 130 L230 190 L340 90 L460 180 L560 110 L680 200 L800 140 L900 195 L900 290 L0 290 Z" fill="rgba(63,214,207,0.05)" stroke="rgba(63,214,207,0.25)" stroke-width="1.5"/>`;
+  s += `<path d="M0 250 L150 205 L280 245 L420 175 L540 235 L660 190 L780 240 L900 210 L900 290 L0 290 Z" fill="rgba(233,242,236,0.03)"/>`;
+  // rain lines
+  for(let i=0;i<26;i++){
+    const x = Math.random()*900, y = Math.random()*130;
+    s += `<line x1="${x}" y1="${y}" x2="${x-8}" y2="${y+22}" stroke="rgba(63,214,207,0.35)" stroke-width="1"/>`;
+  }
+  // sensor nodes
+  const nodes = [[120,128],[340,88],[560,108],[800,138]];
+  nodes.forEach(([x,y])=>{
+    s += `<circle cx="${x}" cy="${y}" r="4" fill="#3fd6cf"/><circle cx="${x}" cy="${y}" r="9" fill="none" stroke="#3fd6cf" stroke-width="1" opacity="0.5"/>`;
+  });
+  s += `<circle cx="340" cy="88" r="16" fill="none" stroke="#e8a93c" stroke-width="1.4" opacity="0.8"/>`;
+  s += `<text x="356" y="82" fill="#e8a93c" font-family="IBM Plex Mono" font-size="10">MEDIUM RISK</text>`;
+  svg.innerHTML = s;
+}
+ 
+/* ================= HELPERS ================= */
+function emptyState(t,d){
+  return `<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M9 12h6M12 9v6"/></svg><div class="t">${t}</div><div class="d">${d}</div></div>`;
+}
+function toast(msg){
+  const wrap = document.getElementById('toast-wrap');
+  const el = document.createElement('div'); el.className='toast'; el.innerHTML = `<span>${msg}</span>`;
+  wrap.appendChild(el);
+  setTimeout(()=>{ el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(()=>el.remove(),300); }, 3200);
+}
+ 
+function renderAll(){
+  renderOverview(); renderLive(); renderRisk(); renderSensorsTable(); renderMap(); renderAlerts();
+  document.getElementById('sys-updated').textContent = nowStr();
+}
+ 
+/* ================= LIVE SIM TICK ================= */
+function tick(){
+  if(!state.simMode){
+    // gentle random walk for demo-stream feel
+    state.rainfall = clampWalk(state.rainfall, 0, 150, 4);
+    state.soil = clampWalk(state.soil, 0, 100, 2);
+    state.tilt = clampWalk(state.tilt, 0, 10, 0.15);
+    state.movement = clampWalk(state.movement, 0, 50, 1);
+    state.temperature = clampWalk(state.temperature, 10, 50, 0.3);
+  }
+  SENSOR_DEFS.forEach(s=>{ sparkData[s.key].shift(); sparkData[s.key].push(state[s.key]); });
+  const risk = computeRisk(state);
+  maybeGenerateAlert(risk);
+  if(currentPage==='overview') renderOverview();
+  if(currentPage==='live') renderLive();
+  if(currentPage==='risk') renderRisk();
+  if(currentPage==='sensors') renderSensorsTable();
+  if(currentPage==='map') renderMap();
+  if(currentPage==='alerts') renderAlerts();
+  document.getElementById('sys-updated').textContent = nowStr();
+}
+function clampWalk(v,min,max,step){ v += (Math.random()-0.5)*2*step; return Math.max(min,Math.min(max,v)); }
+ 
+let refreshTimer = setInterval(()=>{ if(state.autoRefresh) tick(); }, 4000);
+function manualRefresh(){ tick(); toast('Sensor data refreshed'); }
+ 
+/* ================= INIT ================= */
+buildNav();
+renderRoles();
+renderMapFilters();
+renderAnalyticsFilters();
+renderSimSliders();
+renderPresets();
+renderAbout();
+renderModel();
+renderHeroTerrain();
+renderAll();
+renderAnalyticsCharts();
+document.getElementById('threshold-row').style.display = 'flex';
+ 
+// close map popup on outside click
+document.addEventListener('click', (e)=>{
+  const pop = document.getElementById('station-popup');
+  if(pop && pop.style.display==='block' && !pop.contains(e.target) && !e.target.closest('.station-dot')){
+    pop.style.display='none';
+  }
+});
+window.addEventListener('resize', ()=>{ if(currentPage==='map') document.getElementById('station-popup').style.display='none'; });
+</script>
+</body>
+</html>
+ 
